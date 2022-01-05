@@ -106,6 +106,8 @@ sds sdsnewlen(const void *init, size_t initlen) {
     fp = ((unsigned char*)s)-1;
     switch(type) {
         case SDS_TYPE_5: {
+            // #define SDS_TYPE_BITS 3
+            // flag的前五位保存长度，后三位是类型type，因此结构体中sdshdr5不含有len
             *fp = type | (initlen << SDS_TYPE_BITS);
             break;
         }
@@ -140,7 +142,7 @@ sds sdsnewlen(const void *init, size_t initlen) {
     }
     if (initlen && init)
         memcpy(s, init, initlen);
-    s[initlen] = '\0';
+    s[initlen] = '\0';      // sds都以’\0’结尾
     return s;
 }
 
@@ -203,46 +205,51 @@ void sdsclear(sds s) {
  * by sdslen(), but only the free buffer space we have. */
 sds sdsMakeRoomFor(sds s, size_t addlen) {
     void *sh, *newsh;
+    // sdsavail: 获取可用长度，这里的s是指向buf的，通过buf进行寻址
+    // 获取头部(结构体)指针：#define SDS_HDR_VAR(T,s) struct sdshdr##T *sh = (void*)((s)-(sizeof(struct sdshdr##T)));
+    // sdsavail的计算方式：sh->alloc - sh->len;
     size_t avail = sdsavail(s);
     size_t len, newlen;
-    char type, oldtype = s[-1] & SDS_TYPE_MASK;
+    char type, oldtype = s[-1] & SDS_TYPE_MASK; // s[-1] 就是flags
     int hdrlen;
 
-    /* Return ASAP if there is enough space left. */
+    /* Return ASAP if there is enough space left. 可用空间如果 比 增加的多(够用) 直接返回*/
     if (avail >= addlen) return s;
 
-    len = sdslen(s);
-    sh = (char*)s-sdsHdrSize(oldtype);
-    newlen = (len+addlen);
+    len = sdslen(s);                    // O(1)获取字符串长度
+    sh = (char*)s-sdsHdrSize(oldtype);  // 获取头部(结构体sdsHdr)起止指针
+    newlen = (len+addlen);              // 得到新字符串的长度。
+    // 这里就是常说的内存策略的实现 <1M 2倍空间, >1M 多+1M。
     if (newlen < SDS_MAX_PREALLOC)
         newlen *= 2;
     else
         newlen += SDS_MAX_PREALLOC;
 
-    type = sdsReqType(newlen);
+    type = sdsReqType(newlen);  //根据新的字符串长度 重新计算字符串类型
 
     /* Don't use type 5: the user is appending to the string and type 5 is
      * not able to remember empty space, so sdsMakeRoomFor() must be called
      * at every appending operation. */
-    if (type == SDS_TYPE_5) type = SDS_TYPE_8;
+    if (type == SDS_TYPE_5) type = SDS_TYPE_8;  // SDS_TYPE_5 强转成 SDS_TYPE_8
 
-    hdrlen = sdsHdrSize(type);
-    if (oldtype==type) {
+    hdrlen = sdsHdrSize(type);      // 新类型的 头部size
+    if (oldtype==type) {            // 如果没有变化,还没有升级，直接在原来的sds 上重新分配内存。
         newsh = s_realloc(sh, hdrlen+newlen+1);
         if (newsh == NULL) return NULL;
         s = (char*)newsh+hdrlen;
     } else {
         /* Since the header size changes, need to move the string forward,
-         * and can't use realloc */
+         * and can't use realloc 
+         * 如果类型发生升级变化, 如sdshdr8 -> sdshdr16 则重新分配内存*/
         newsh = s_malloc(hdrlen+newlen+1);
         if (newsh == NULL) return NULL;
-        memcpy((char*)newsh+hdrlen, s, len+1);
-        s_free(sh);
-        s = (char*)newsh+hdrlen;
-        s[-1] = type;
-        sdssetlen(s, len);
+        memcpy((char*)newsh+hdrlen, s, len+1);  // 将原字符串内容拷贝到新开辟的内存中
+        s_free(sh);         // 释放原来sds的内存
+        s = (char*)newsh+hdrlen;   // 把hdr里的buf 和 s 关联起来
+        s[-1] = type;       // 设置flag
+        sdssetlen(s, len);  // 设置len
     }
-    sdssetalloc(s, newlen);
+    sdssetalloc(s, newlen); // 设置alloc 可用长度
     return s;
 }
 

@@ -2404,10 +2404,10 @@ void clusterSendPing(clusterLink *link, int type) {
     buf = zcalloc(totlen);
     hdr = (clusterMsg*) buf;
 
-    /* Populate the header. */
+    /* Populate the header. | 如果是ping 消息设置 ping发送时间 */
     if (link->node && type == CLUSTERMSG_TYPE_PING)
         link->node->ping_sent = mstime();
-    clusterBuildMessageHdr(hdr,type);
+    clusterBuildMessageHdr(hdr,type);  // 构建消息头
 
     /* Populate the gossip fields */
     int maxiterations = wanted*3;
@@ -3434,25 +3434,31 @@ void clusterCron(void) {
     dictReleaseIterator(di);
 
     /* Ping some random node 1 time every 10 iterations, so that we usually ping
-     * one random node every second. */
+     * one random node every second. 
+     * 每执行10次clusterCron函数，执行1次该分支代码
+     */
     if (!(iteration % 10)) {
         int j;
 
         /* Check a few random nodes and ping the one with the oldest
-         * pong_received time. */
+         * pong_received time.
+         * 随机选5个节点
+         */
         for (j = 0; j < 5; j++) {
             de = dictGetRandomKey(server.cluster->nodes);
             clusterNode *this = dictGetVal(de);
 
-            /* Don't ping nodes disconnected or with a ping currently active. */
+            /* Don't ping nodes disconnected or with a ping currently active. | 不向断连的节点、当前节点和正在握手的节点发送Ping消息*/
             if (this->link == NULL || this->ping_sent != 0) continue;
             if (this->flags & (CLUSTER_NODE_MYSELF|CLUSTER_NODE_HANDSHAKE))
                 continue;
+            // 选向当前节点发送Pong消息最早的节点
             if (min_pong_node == NULL || min_pong > this->pong_received) {
                 min_pong_node = this;
                 min_pong = this->pong_received;
             }
         }
+        // 如果选出了最早向当前节点发送Pong消息的节点，那么调用clusterSendPing函数向该节点发送Ping消息
         if (min_pong_node) {
             serverLog(LL_DEBUG,"Pinging node %.40s", min_pong_node->name);
             clusterSendPing(min_pong_node->link, CLUSTERMSG_TYPE_PING);

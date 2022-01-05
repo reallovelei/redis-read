@@ -1127,13 +1127,14 @@ void setExpire(client *c, redisDb *db, robj *key, long long when) {
 long long getExpire(redisDb *db, robj *key) {
     dictEntry *de;
 
-    /* No expire? return ASAP */
+    /* No expire? return ASAP 没有过期贱  -1 */
     if (dictSize(db->expires) == 0 ||
        (de = dictFind(db->expires,key->ptr)) == NULL) return -1;
 
     /* The entry was found in the expire dict, this means it should also
      * be present in the main dict (safety check). */
     serverAssertWithInfo(NULL,key,dictFind(db->dict,key->ptr) != NULL);
+    // 返回过期时间
     return dictGetSignedIntegerVal(de);
 }
 

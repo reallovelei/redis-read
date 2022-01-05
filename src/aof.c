@@ -1293,13 +1293,13 @@ int rewriteAppendOnlyFileRio(rio *aof) {
     dictEntry *de;
     size_t processed = 0;
     int j;
-
+    // 遍历所有的database
     for (j = 0; j < server.dbnum; j++) {
         char selectcmd[] = "*2\r\n$6\r\nSELECT\r\n";
         redisDb *db = server.db+j;
         dict *d = db->dict;
         if (dictSize(d) == 0) continue;
-        di = dictGetSafeIterator(d);
+        di = dictGetSafeIterator(d);// 迭代器
 
         /* SELECT the new DB */
         if (rioWrite(aof,selectcmd,sizeof(selectcmd)-1) == 0) goto werr;
@@ -1314,10 +1314,10 @@ int rewriteAppendOnlyFileRio(rio *aof) {
             keystr = dictGetKey(de);
             o = dictGetVal(de);
             initStaticStringObject(key,keystr);
-
+            // 获取key 过期时间
             expiretime = getExpire(db,&key);
 
-            /* Save the key and associated value */
+            /* Save the key and associated value 写入不同类型的键值对 */
             if (o->type == OBJ_STRING) {
                 /* Emit a SET command */
                 char cmd[]="*3\r\n$3\r\nSET\r\n";
@@ -1340,7 +1340,7 @@ int rewriteAppendOnlyFileRio(rio *aof) {
             } else {
                 serverPanic("Unknown object type");
             }
-            /* Save the expire time */
+            /* Save the expire time  为当前key 写入过期时间*/
             if (expiretime != -1) {
                 char cmd[]="*3\r\n$9\r\nPEXPIREAT\r\n";
                 if (rioWrite(aof,cmd,sizeof(cmd)-1) == 0) goto werr;
@@ -1353,6 +1353,7 @@ int rewriteAppendOnlyFileRio(rio *aof) {
                 aofReadDiffFromParent();
             }
         }
+        // 迭代器循环用完了，没啥用了。释放掉
         dictReleaseIterator(di);
         di = NULL;
     }
@@ -1379,7 +1380,7 @@ int rewriteAppendOnlyFile(char *filename) {
     /* Note that we have to use a different temp name here compared to the
      * one used by rewriteAppendOnlyFileBackground() function. */
     snprintf(tmpfile,256,"temp-rewriteaof-%d.aof", (int) getpid());
-    fp = fopen(tmpfile,"w");
+    fp = fopen(tmpfile,"w"); // 打开aof文件
     if (!fp) {
         serverLog(LL_WARNING, "Opening the temp file for AOF rewrite in rewriteAppendOnlyFile(): %s", strerror(errno));
         return C_ERR;
@@ -1390,7 +1391,7 @@ int rewriteAppendOnlyFile(char *filename) {
 
     if (server.aof_rewrite_incremental_fsync)
         rioSetAutoSync(&aof,REDIS_AUTOSYNC_BYTES);
-
+    // 主要逻辑
     if (server.aof_use_rdb_preamble) {
         int error;
         if (rdbSaveRio(&aof,&error,RDB_SAVE_AOF_PREAMBLE,NULL) == C_ERR) {
@@ -1452,7 +1453,7 @@ int rewriteAppendOnlyFile(char *filename) {
     if (fclose(fp) == EOF) goto werr;
 
     /* Use RENAME to make sure the DB file is changed atomically only
-     * if the generate DB file is ok. */
+     * if the generate DB file is ok. 重写文件名 */
     if (rename(tmpfile,filename) == -1) {
         serverLog(LL_WARNING,"Error moving temp append only file on the final destination: %s", strerror(errno));
         unlink(tmpfile);
@@ -1561,7 +1562,7 @@ void aofClosePipes(void) {
 int rewriteAppendOnlyFileBackground(void) {
     pid_t childpid;
     long long start;
-
+    // 已经有进程在进行AOF了
     if (server.aof_child_pid != -1 || server.rdb_child_pid != -1) return C_ERR;
     if (aofCreatePipes() != C_OK) return C_ERR;
     openChildInfoPipe();
@@ -1571,7 +1572,7 @@ int rewriteAppendOnlyFileBackground(void) {
 
         /* Child */
         closeListeningSockets(0);
-        redisSetProcTitle("redis-aof-rewrite");
+        redisSetProcTitle("redis-aof-rewrite"); // 设置进程名称
         snprintf(tmpfile,256,"temp-rewriteaof-bg-%d.aof", (int) getpid());
         if (rewriteAppendOnlyFile(tmpfile) == C_OK) {
             size_t private_dirty = zmalloc_get_private_dirty(-1);
@@ -1619,12 +1620,12 @@ int rewriteAppendOnlyFileBackground(void) {
 }
 
 void bgrewriteaofCommand(client *c) {
-    if (server.aof_child_pid != -1) {
+    if (server.aof_child_pid != -1) { // 正在进行aof rewrite
         addReplyError(c,"Background append only file rewriting already in progress");
-    } else if (server.rdb_child_pid != -1) {
+    } else if (server.rdb_child_pid != -1) { // 正在进行rdb,先占坑, 等bgsave完成后，rewrite再开始。
         server.aof_rewrite_scheduled = 1;
         addReplyStatus(c,"Background append only file rewriting scheduled");
-    } else if (rewriteAppendOnlyFileBackground() == C_OK) {
+    } else if (rewriteAppendOnlyFileBackground() == C_OK) { // 如果都没有就执行rewrite
         addReplyStatus(c,"Background append only file rewriting started");
     } else {
         addReply(c,shared.err);

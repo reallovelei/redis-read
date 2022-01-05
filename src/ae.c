@@ -145,7 +145,7 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
     if (aeApiAddEvent(eventLoop, fd, mask) == -1)
         return AE_ERR;
     fe->mask |= mask;
-    if (mask & AE_READABLE) fe->rfileProc = proc;
+    if (mask & AE_READABLE) fe->rfileProc = proc;   // 判断是 读/写事件的回调
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
     fe->clientData = clientData;
     if (fd > eventLoop->maxfd)
@@ -359,7 +359,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
 {
     int processed = 0, numevents;
 
-    /* Nothing to do? return ASAP */
+    /* Nothing to do? return ASAP 如果没有关注的事件 直接返回 */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
 
     /* Note that we want call select() even if there are no
@@ -377,7 +377,7 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         if (shortest) {
             long now_sec, now_ms;
 
-            aeGetTime(&now_sec, &now_ms);
+            aeGetTime(&now_sec, &now_ms); // 获得最近的时间事件,根据最近可执行定时事件和现在时间的时间差来决定文件事件的阻塞时间。
             tvp = &tv;
 
             /* How many milliseconds we need to wait for the next
@@ -407,7 +407,9 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
         }
 
         /* Call the multiplexing API, will return only on timeout or when
-         * some event fires. */
+         * some event fires. 
+         * 调用多路复用接口 得到事件数
+         **/
         numevents = aeApiPoll(eventLoop, tvp);
 
         /* After sleep callback. */
@@ -415,10 +417,11 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             eventLoop->aftersleep(eventLoop);
 
         for (j = 0; j < numevents; j++) {
+            // 从已就绪的数组中获取事件
             aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
             int mask = eventLoop->fired[j].mask;
             int fd = eventLoop->fired[j].fd;
-            int fired = 0; /* Number of events fired for current fd. */
+            int fired = 0; /* Number of events fired for current fd. 当前fd 触发的事件数 @todo */
 
             /* Normally we execute the readable event first, and the writable
              * event laster. This is useful as sometimes we may be able
@@ -438,13 +441,15 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
              * didn't processed, so we check if the event is still valid.
              *
              * Fire the readable event if the call sequence is not
-             * inverted. */
+             * inverted. 
+             * 处理读事件
+             * */
             if (!invert && fe->mask & mask & AE_READABLE) {
                 fe->rfileProc(eventLoop,fd,fe->clientData,mask);
                 fired++;
             }
 
-            /* Fire the writable event. */
+            /* Fire the writable event. 执行写事件回调函数*/
             if (fe->mask & mask & AE_WRITABLE) {
                 if (!fired || fe->wfileProc != fe->rfileProc) {
                     fe->wfileProc(eventLoop,fd,fe->clientData,mask);
@@ -464,11 +469,15 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags)
             processed++;
         }
     }
-    /* Check time events */
+    /* Check time events 处理定时事件*/
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
 
-    return processed; /* return the number of processed file/time events */
+    return processed; /* return the number of processed file/time events. */
+    /**
+     * processed为已处理的文件事件/定时事件的总数。
+     * 可以看出是先执行文件事件 再执行定时事件的。
+     * */
 }
 
 /* Wait for milliseconds until the given file descriptor becomes
@@ -496,9 +505,9 @@ int aeWait(int fd, int mask, long long milliseconds) {
 void aeMain(aeEventLoop *eventLoop) {
     eventLoop->stop = 0;
     while (!eventLoop->stop) {
-        if (eventLoop->beforesleep != NULL)
+        if (eventLoop->beforesleep != NULL)             //如果有需要在事件处理前执行的函数 就运行，有点类似装饰模式?
             eventLoop->beforesleep(eventLoop);
-        aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP);
+        aeProcessEvents(eventLoop, AE_ALL_EVENTS|AE_CALL_AFTER_SLEEP); //处理事件
     }
 }
 

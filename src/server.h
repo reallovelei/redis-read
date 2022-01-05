@@ -257,17 +257,17 @@ typedef long long mstime_t; /* millisecond time type. */
 #define AOF_WAIT_REWRITE 2    /* AOF waits rewrite to start appending */
 
 /* Client flags */
-#define CLIENT_SLAVE (1<<0)   /* This client is a repliaca */
-#define CLIENT_MASTER (1<<1)  /* This client is a master */
-#define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR */
-#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context */
-#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation */
+#define CLIENT_SLAVE (1<<0)   /* This client is a repliaca | 客户端代表的是一个从服务器 */
+    #define CLIENT_MASTER v (1<<1)  /* This client is a master | 客户端代表的是一个主服务器 */
+#define CLIENT_MONITOR (1<<2) /* This client is a slave monitor, see MONITOR  标志表示客户端正在执行 MONITOR 命令 */
+#define CLIENT_MULTI (1<<3)   /* This client is in a MULTI context 客户端正在执行事务 */
+#define CLIENT_BLOCKED (1<<4) /* The client is waiting in a blocking operation | 正在被 BRPOP、BLPOP 等命令阻塞 */
 #define CLIENT_DIRTY_CAS (1<<5) /* Watched keys modified. EXEC will fail. */
 #define CLIENT_CLOSE_AFTER_REPLY (1<<6) /* Close after writing entire reply. */
 #define CLIENT_UNBLOCKED (1<<7) /* This client was unblocked and is stored in
                                   server.unblocked_clients */
-#define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua */
-#define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command */
+#define CLIENT_LUA (1<<8) /* This is a non connected client used by Lua | 专门用于处理Lua脚本里面包含的Redis命令的伪客户端 */
+#define CLIENT_ASKING (1<<9)     /* Client issued the ASKING command | 客户端向集群节点发送了 ASKING 命令 */
 #define CLIENT_CLOSE_ASAP (1<<10)/* Close this client ASAP */
 #define CLIENT_UNIX_SOCKET (1<<11) /* Client connected via Unix domain socket */
 #define CLIENT_DIRTY_EXEC (1<<12)  /* EXEC will fail for errors while queueing */
@@ -311,7 +311,7 @@ typedef long long mstime_t; /* millisecond time type. */
 #define BLOCKED_NUM 6     /* Number of blocked states. */
 
 /* Client request types */
-#define PROTO_REQ_INLINE 1
+#define PROTO_REQ_INLINE 1      //
 #define PROTO_REQ_MULTIBULK 2
 
 /* Client classes for client limits, currently used only for
@@ -1045,7 +1045,7 @@ struct clusterState;
 struct redisServer {
     /* General */
     pid_t pid;                  /* Main process pid. */
-    char *configfile;           /* Absolute config file path, or NULL */
+    char *configfile;           /* Absolute config file path, or NULL 配置文件绝对路径 */
     char *executable;           /* Absolute executable file path. */
     char **exec_argv;           /* Executable argv vector (copy). */
     int dynamic_hz;             /* Change hz value depending on # of clients. */
@@ -1053,17 +1053,17 @@ struct redisServer {
                                    the actual 'hz' field value if dynamic-hz
                                    is enabled. */
     int hz;                     /* serverCron() calls frequency in hertz */
-    redisDb *db;
-    dict *commands;             /* Command table */
+    redisDb *db;                /* 数据库数组 */
+    dict *commands;             /* Command table  命令字典，Redis支持的所有命令都存储在这个字典中，key为命令名称，vaue为struct redisCommand对象*/
     dict *orig_commands;        /* Command table before command renaming. */
-    aeEventLoop *el;
+    aeEventLoop *el;            // 事件循环
     _Atomic unsigned int lruclock; /* Clock for LRU eviction */
     int shutdown_asap;          /* SHUTDOWN needed ASAP */
     int activerehashing;        /* Incremental rehash in serverCron() */
     int active_defrag_running;  /* Active defragmentation running (holds current scan aggressiveness) */
     char *pidfile;              /* PID file path */
     int arch_bits;              /* 32 or 64 depending on sizeof(long) */
-    int cronloops;              /* Number of times the cron function run */
+    int cronloops;              /* Number of times the cron function run | serverCron函数每执行一次，这个属性的值就增一。*/
     char runid[CONFIG_RUN_ID_SIZE+1];  /* ID always different at every exec. */
     int sentinel_mode;          /* True if this instance is a Sentinel. */
     size_t initial_memory_usage; /* Bytes used after initialization. */
@@ -1088,7 +1088,7 @@ struct redisServer {
     int sofd;                   /* Unix socket file descriptor */
     int cfd[CONFIG_BINDADDR_MAX];/* Cluster bus listening socket */
     int cfd_count;              /* Used slots in cfd[] */
-    list *clients;              /* List of active clients */
+    list *clients;              /* 连接到当前server的所有客户端 List of active clients */
     list *clients_to_close;     /* Clients to close asynchronously */
     list *clients_pending_write; /* There is to write or install handler. */
     list *clients_pending_read;  /* Client has pending read socket buffers. */
@@ -1133,7 +1133,7 @@ struct redisServer {
     long long stat_active_defrag_key_hits;  /* number of keys with moved allocations */
     long long stat_active_defrag_key_misses;/* number of keys scanned and not moved */
     long long stat_active_defrag_scanned;   /* number of dictEntries scanned */
-    size_t stat_peak_memory;        /* Max used memory record */
+    size_t stat_peak_memory;        /* Max used memory record 已使用得内存峰值*/
     long long stat_fork_time;       /* Time needed to perform latest fork() */
     double stat_fork_rate;          /* Fork rate in GB/sec. */
     long long stat_rejected_conn;   /* Clients rejected because of maxclients */
@@ -1187,7 +1187,7 @@ struct redisServer {
     off_t aof_current_size;         /* AOF current size. */
     off_t aof_fsync_offset;         /* AOF offset which is already synced to disk. */
     int aof_rewrite_scheduled;      /* Rewrite once BGSAVE terminates. */
-    pid_t aof_child_pid;            /* PID if rewriting process */
+    pid_t aof_child_pid;            /* PID if rewriting process 执行BGREWRITEAOF命令的子进程的ID -1代表没有在执行*/
     list *aof_rewrite_buf_blocks;   /* Hold changes during an AOF rewrite. */
     sds aof_buf;      /* AOF buffer, written before entering the event loop */
     int aof_fd;       /* File descriptor of currently selected AOF file */
@@ -1215,16 +1215,16 @@ struct redisServer {
                                       to child process. */
     sds aof_child_diff;             /* AOF diff accumulator child side. */
     /* RDB persistence */
-    long long dirty;                /* Changes to DB from the last save */
-    long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE */
-    pid_t rdb_child_pid;            /* PID of RDB saving child */
+    long long dirty;                /* Changes to DB from the last save | 自上次成功备份 RDB 文件之后，包括 save 和 bgsave 命令，整个 redis 数据库又发生了多少次修改。 */
+    long long dirty_before_bgsave;  /* Used to restore dirty on failed BGSAVE | 上一次 bgsave 命令备份时，数据库总的修改次数。 */
+    pid_t rdb_child_pid;            /* PID of RDB saving child -1：代表没有在执行bgsave */
     struct saveparam *saveparams;   /* Save points array for RDB */
     int saveparamslen;              /* Number of saving points */
     char *rdb_filename;             /* Name of RDB file */
     int rdb_compression;            /* Use compression in RDB? */
     int rdb_checksum;               /* Use RDB checksum? */
-    time_t lastsave;                /* Unix time of last successful save */
-    time_t lastbgsave_try;          /* Unix time of last attempted bgsave */
+    time_t lastsave;                /* Unix time of last successful save | 上次成功备份的时间点 */
+    time_t lastbgsave_try;          /* Unix time of last attempted bgsave | 上次试图备份的时间点 */
     time_t rdb_save_time_last;      /* Time used by last RDB save run. */
     time_t rdb_save_time_start;     /* Current RDB save start time. */
     int rdb_bgsave_scheduled;       /* BGSAVE when possible if true. */
@@ -1357,7 +1357,7 @@ struct redisServer {
     int notify_keyspace_events; /* Events to propagate via Pub/Sub. This is an
                                    xor of NOTIFY_... flags. */
     /* Cluster */
-    int cluster_enabled;      /* Is cluster enabled? */
+    int cluster_enabled;      /* Is cluster enabled 是否处于集群模式 */
     mstime_t cluster_node_timeout; /* Cluster node timeout. */
     char *cluster_configfile; /* Cluster auto-generated config file name. */
     struct clusterState *cluster;  /* State of the cluster */

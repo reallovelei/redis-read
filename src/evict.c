@@ -397,7 +397,9 @@ int getMaxmemoryState(size_t *total, size_t *logical, size_t *tofree, float *lev
     size_t mem_reported, mem_used, mem_tofree;
 
     /* Check if we are over the memory usage limit. If we are not, no need
-     * to subtract the slaves output buffers. We can just return ASAP. */
+     * to subtract the slaves output buffers. We can just return ASAP. 
+     * 已使用的内存量
+     */
     mem_reported = zmalloc_used_memory();
     if (total) *total = mem_reported;
 
@@ -406,9 +408,11 @@ int getMaxmemoryState(size_t *total, size_t *logical, size_t *tofree, float *lev
     if (return_ok_asap && !level) return C_OK;
 
     /* Remove the size of slaves output buffers and AOF buffer from the
-     * count of used memory. */
+     * count of used memory. 
+     * 将用于主从复制的复制缓冲区大小从已使用内存量中扣除??
+     */
     mem_used = mem_reported;
-    size_t overhead = freeMemoryGetNotCountedMemory();
+    size_t overhead = freeMemoryGetNotCountedMemory();  // overhead ??
     mem_used = (mem_used > overhead) ? mem_used-overhead : 0;
 
     /* Compute the ratio of memory usage. */
@@ -425,7 +429,7 @@ int getMaxmemoryState(size_t *total, size_t *logical, size_t *tofree, float *lev
     /* Check if we are still over the memory limit. */
     if (mem_used <= server.maxmemory) return C_OK;
 
-    /* Compute how much memory we need to free. */
+    /* Compute how much memory we need to free. 计算出来需要释放多少内存 */
     mem_tofree = mem_used - server.maxmemory;
 
     if (logical) *logical = mem_used;

@@ -1900,13 +1900,13 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
     {
         int statloc;
         pid_t pid;
-
+        // 如果这两家伙有一个不是-1 就代表有在执行的，那就等。
         if ((pid = wait3(&statloc,WNOHANG,NULL)) != 0) {
             int exitcode = WEXITSTATUS(statloc);
             int bysignal = 0;
 
             if (WIFSIGNALED(statloc)) bysignal = WTERMSIG(statloc);
-
+            // 持久化异常，打印日志
             if (pid == -1) {
                 serverLog(LL_WARNING,"wait3() returned an error: %s. "
                     "rdb_child_pid = %d, aof_child_pid = %d",
@@ -1914,9 +1914,11 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                     (int) server.rdb_child_pid,
                     (int) server.aof_child_pid);
             } else if (pid == server.rdb_child_pid) {
+                //成功持久化 RDB 文件，调用方法用心的RDB文件覆盖旧的RDB文件
                 backgroundSaveDoneHandler(exitcode,bysignal);
                 if (!bysignal && exitcode == 0) receiveChildInfo();
             } else if (pid == server.aof_child_pid) {
+                //成功执行 AOF，替换现有的 AOF文件
                 backgroundRewriteDoneHandler(exitcode,bysignal);
                 if (!bysignal && exitcode == 0) receiveChildInfo();
             } else {
@@ -1926,19 +1928,25 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                         (long)pid);
                 }
             }
+            //如果子进程未结束，不允许字典进行 rehash
             updateDictResizePolicy();
             closeChildInfoPipe();
         }
     } else {
         /* If there is not a background saving/rewrite in progress check if
-         * we have to save/rewrite now. */
+         * we have to save/rewrite now. 
+         * 如果没有正在进行bgsave 或者rewrite的。
+         * 遍历redis.conf里 save参数  默认3个
+         */
         for (j = 0; j < server.saveparamslen; j++) {
             struct saveparam *sp = server.saveparams+j;
 
             /* Save if we reached the given amount of changes,
              * the given amount of seconds, and if the latest bgsave was
              * successful or if, in case of an error, at least
-             * CONFIG_BGSAVE_RETRY_DELAY seconds already elapsed. */
+             * CONFIG_BGSAVE_RETRY_DELAY seconds already elapsed. 
+             * 判断修改次数 和 时间是否满足，如果满足就进行bgsave。
+             * */
             if (server.dirty >= sp->changes &&
                 server.unixtime-server.lastsave > sp->seconds &&
                 (server.unixtime-server.lastbgsave_try >
@@ -1949,6 +1957,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                     sp->changes, (int)sp->seconds);
                 rdbSaveInfo rsi, *rsiptr;
                 rsiptr = rdbPopulateSaveInfo(&rsi);
+                // 主要就是这个家伙，进行 RDB 文件生成
                 rdbSaveBackground(server.rdb_filename,rsiptr);
                 break;
             }
@@ -1992,7 +2001,7 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
      * detect transfer failures, start background RDB transfers and so forth. */
     run_with_period(1000) replicationCron();
 
-    /* Run the Redis Cluster cron. */
+    /* Run the Redis Cluster cron. | 每100ms调用一次 clusterCron 函数 */
     run_with_period(100) {
         if (server.cluster_enabled) clusterCron();
     }
@@ -2099,7 +2108,7 @@ void afterSleep(struct aeEventLoop *eventLoop) {
     handleClientsWithPendingReadsUsingThreads();
 }
 
-/* =========================== Server initialization ======================== */
+/* =========================== Server initialization 初始化 ======================== */
 
 void createSharedObjects(void) {
     int j;
@@ -2819,14 +2828,15 @@ void initServer(void) {
 
     /* Create the timer callback, this is our way to process many background
      * operations incrementally, like clients timeout, eviction of unaccessed
-     * expired keys and so forth. */
+     * expired keys and so forth. 创建定时事件 回调为serverCron: 如统计信息、清理过期key、关闭失效客户端连接,rdb/aof */
     if (aeCreateTimeEvent(server.el, 1, serverCron, NULL, NULL) == AE_ERR) {
         serverPanic("Can't create event loop timers.");
         exit(1);
     }
 
     /* Create an event handler for accepting new connections in TCP and Unix
-     * domain sockets. */
+     * domain sockets. 
+     * 为accept 注册一个处理方法 acceptTcpHandler(当有新的链接来的时候) */
     for (j = 0; j < server.ipfd_count; j++) {
         if (aeCreateFileEvent(server.el, server.ipfd[j], AE_READABLE,
             acceptTcpHandler,NULL) == AE_ERR)
@@ -2848,7 +2858,7 @@ void initServer(void) {
                 "blocked clients subsystem.");
     }
 
-    /* Open the AOF file if needed. */
+    /* Open the AOF file if needed. 如果开启了AOF  以append方式打开 aof文件*/
     if (server.aof_state == AOF_ON) {
         server.aof_fd = open(server.aof_filename,
                                O_WRONLY|O_APPEND|O_CREAT,0644);
@@ -2869,9 +2879,9 @@ void initServer(void) {
         server.maxmemory_policy = MAXMEMORY_NO_EVICTION;
     }
 
-    if (server.cluster_enabled) clusterInit();
+    if (server.cluster_enabled) clusterInit();  // 如果是集群模式 初始化@todo 后面到集群部分再看
     replicationScriptCacheInit();
-    scriptingInit(1);
+    scriptingInit(1);   // 会创建一个lua的client
     slowlogInit();
     latencyMonitorInit();
     bioInit();
@@ -3362,12 +3372,12 @@ int processCommand(client *c) {
      * However we don't perform the redirection if:
      * 1) The sender of this command is our master.
      * 2) The command has no key arguments. */
-    if (server.cluster_enabled &&
-        !(c->flags & CLIENT_MASTER) &&
-        !(c->flags & CLIENT_LUA &&
+    if (server.cluster_enabled &&   // 集群模式
+        !(c->flags & CLIENT_MASTER) &&  // 非主
+        !(c->flags & CLIENT_LUA &&  // 非 LUA
           server.lua_caller->flags & CLIENT_MASTER) &&
         !(c->cmd->getkeys_proc == NULL && c->cmd->firstkey == 0 &&
-          c->cmd->proc != execCommand))
+          c->cmd->proc != execCommand))  // 不带key 且 执行命令 不是EXEC
     {
         int hashslot;
         int error_code;
@@ -3455,7 +3465,8 @@ int processCommand(client *c) {
     }
 
     /* Only allow a subset of commands in the context of Pub/Sub if the
-     * connection is in RESP2 mode. With RESP3 there are no limits. */
+     * connection is in RESP2 mode. With RESP3 there are no limits.
+     * 客户端有 CLIENT_PUBSUB  标记，同时当前命令不是EXEC，DISCARD, MULTI和WATCH */
     if ((c->flags & CLIENT_PUBSUB && c->resp == 2) &&
         c->cmd->proc != pingCommand &&
         c->cmd->proc != subscribeCommand &&
@@ -3502,7 +3513,10 @@ int processCommand(client *c) {
         return C_OK;
     }
 
-    /* Exec the command */
+    /* Exec the command 
+     * 客户端有CLIENT_MULTI标记，同时当前命令不是EXEC，DISCARD, MULTI和WATCH 
+     * 执行命令
+     */
     if (c->flags & CLIENT_MULTI &&
         c->cmd->proc != execCommand && c->cmd->proc != discardCommand &&
         c->cmd->proc != multiCommand && c->cmd->proc != watchCommand)
@@ -4769,12 +4783,12 @@ int main(int argc, char **argv) {
 #ifdef INIT_SETPROCTITLE_REPLACEMENT
     spt_init(argc, argv);
 #endif
-    setlocale(LC_COLLATE,"");
+    setlocale(LC_COLLATE,""); // 设置时区
     tzset(); /* Populates 'timezone' global. */
     zmalloc_set_oom_handler(redisOutOfMemoryHandler);
     srand(time(NULL)^getpid());
     gettimeofday(&tv,NULL);
-
+    // 设置hash种子
     char hashseed[16];
     getRandomHexChars(hashseed,sizeof(hashseed));
     dictSetHashFunctionSeed((uint8_t*)hashseed);
@@ -4891,7 +4905,7 @@ int main(int argc, char **argv) {
     server.supervised = redisIsSupervised(server.supervised_mode);
     int background = server.daemonize && !server.supervised;
     if (background) daemonize();
-
+    //初始化 服务器 数据结构
     initServer();
     if (background || server.pidfile) createPidFile();
     redisSetProcTitle(argv[0]);
@@ -4899,7 +4913,7 @@ int main(int argc, char **argv) {
     checkTcpBacklogSettings();
 
     if (!server.sentinel_mode) {
-        /* Things not needed when running in Sentinel mode. */
+        /* Things not needed when running in Sentinel mode.  如果不是sentinel的就完事儿了。*/
         serverLog(LL_WARNING,"Server initialized");
     #ifdef __linux__
         linuxMemoryWarnings();
@@ -4927,11 +4941,11 @@ int main(int argc, char **argv) {
     if (server.maxmemory > 0 && server.maxmemory < 1024*1024) {
         serverLog(LL_WARNING,"WARNING: You specified a maxmemory value that is less than 1MB (current value is %llu bytes). Are you sure this is what you really want?", server.maxmemory);
     }
-
-    aeSetBeforeSleepProc(server.el,beforeSleep);
+    
+    aeSetBeforeSleepProc(server.el,beforeSleep);    // 运行事件处理器，一直到服务器关闭为止。
     aeSetAfterSleepProc(server.el,afterSleep);
-    aeMain(server.el);
-    aeDeleteEventLoop(server.el);
+    aeMain(server.el);              // 事件处理器的主循环
+    aeDeleteEventLoop(server.el);   // 都要关闭了，停止事件循环
     return 0;
 }
 
